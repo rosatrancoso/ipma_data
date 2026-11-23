@@ -31,6 +31,7 @@ def fetch_observations(url: str, timeout: float) -> dict[str, Any]:
         url,
         headers={"User-Agent": "ipma-observations-sqlite/1.0"},
     )
+    print(f"Fetching {request}")
     with urlopen(request, timeout=timeout) as response:
         payload = response.read()
     data = json.loads(payload)
@@ -68,6 +69,7 @@ def observation_rows(data: dict[str, Any]) -> tuple[list[tuple[str, str, str, fl
 
 
 def update_database(db_path: str, rows: list[tuple[str, str, str, float]]) -> None:
+    print(f"Updating database {db_path}")
     with sqlite3.connect(db_path) as connection:
         connection.execute(
             """CREATE TABLE IF NOT EXISTS obs (
