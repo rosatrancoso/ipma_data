@@ -37,7 +37,19 @@ jobs:
           test -s "$db"
           cp "$db" "$backup"
 
-          python3 ipma_observations_to_sqlite.py --db "$db"
+          #python3 ipma_observations_to_sqlite.py --db "$db"
+          
+          for attempt in 1 2 3; do
+            if python3 ipma_observations_to_sqlite.py --db "$db" --timeout 120; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "IPMA update failed after 3 attempts" >&2
+              exit 1
+            fi
+            echo "Attempt $attempt failed; retrying in 30 seconds..."
+            sleep 30
+          done
 
           python3 -c '
           import sqlite3, sys
