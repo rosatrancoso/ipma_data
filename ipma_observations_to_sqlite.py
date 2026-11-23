@@ -31,7 +31,7 @@ def fetch_observations(url: str, timeout: float) -> dict[str, Any]:
         url,
         headers={"User-Agent": "ipma-observations-sqlite/1.0"},
     )
-    print(f"Fetching {request}")
+    print(f"Fetching {url}")
     with urlopen(request, timeout=timeout) as response:
         payload = response.read()
     data = json.loads(payload)
