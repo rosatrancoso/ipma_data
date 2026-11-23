@@ -98,6 +98,13 @@ const fmt=(v,d=1)=>usable(v)?Number(v).toFixed(d):"—";
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 function status(s,error=false){$("status").textContent=s;$("status").classList.toggle("error",error)}
 function quote(s){return '"'+String(s).replace(/"/g,'""')+'"'}
+// Convert sql.js exec() results into an array of objects keyed by column name.
+function rowsFromResult(result){
+ const first=result?.[0];
+ if(!first)return [];
+ const columns=first.columns||[];
+ return (first.values||[]).map(values=>Object.fromEntries(columns.map((name,i)=>[name,values[i]])));
+}
 function getTables(){return db.exec("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")[0]?.values.map(r=>r[0])||[]}
 function getCols(table){return db.exec(`PRAGMA table_info(${quote(table)})`)[0]?.values.map(r=>r[1])||[]}
 function findCol(cols,key){const wanted=aliases[key]||[key];for(const a of wanted){const hit=cols.find(c=>norm(c)===norm(a));if(hit)return hit}return null}
@@ -176,14 +183,19 @@ function selectStation(id,fly){
 function valueFor(row,key){const col=obsCols[key];return col?row[col]:null}
 function fetchDayRows(){
  const sql=`SELECT time,varname,value FROM obs WHERE station = ? AND substr(time,1,10) = ? ORDER BY time,varname`;
- const res=db.exec({sql,bind:[activeStation,activeDate]});
  const byTime=new Map();
- if(!res[0])return [];
- const {values}=res[0];
- values.forEach(([time,varname,value])=>{
-  if(!byTime.has(time))byTime.set(time,{time,ms:Date.parse(String(time).replace(" ","T")+"Z"),values:{}});
-  byTime.get(time).values[varname]=value;
- });
+ const stmt=db.prepare(sql);
+ try{
+  stmt.bind([String(activeStation),String(activeDate)]);
+  while(stmt.step()){
+   const row=stmt.getAsObject();
+   const time=String(row.time);
+   if(!byTime.has(time))byTime.set(time,{time,ms:Date.parse(time.replace(" ","T")+"Z"),values:{}});
+   byTime.get(time).values[row.varname]=row.value;
+  }
+ }finally{
+  stmt.free();
+ }
  return [...byTime.values()].sort((a,b)=>a.time.localeCompare(b.time));
 }
 function setCard(id,v,u,d=1){$(id).innerHTML=usable(v)?`${fmt(v,d)} <span class="card-unit">${u}</span>`:"—"}
