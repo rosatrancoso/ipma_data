@@ -51,7 +51,7 @@ footer{display:flex;justify-content:space-between;gap:12px;margin-top:14px;color
 <section>
 <div class="cards">
 <article class="card"><div class="card-label">Latest temperature</div><div id="temperature" class="card-value">—</div></article>
-<article class="card"><div class="card-label">Daily precipitation</div><div id="rain" class="card-value">—</div></article>
+<article class="card"><div class="card-label">Daily accumulated precipitation</div><div id="rain" class="card-value">—</div></article>
 <article class="card"><div class="card-label">Latest wind speed</div><div id="wind" class="card-value">—</div></article>
 <article class="card"><div class="card-label">Latest humidity</div><div id="humidity" class="card-value">—</div></article>
 </div>
@@ -82,11 +82,12 @@ const aliases={
  lat:["latitude","lat"], lon:["longitude","lon","lng"]
 };
 const specs=[
+{key:"precAcumulada",label:"Daily accumulated precipitation (from 00:00)",unit:"mm",color:"#58c5e8",cumulative:true},
+{key:"precAcumulada",label:"Hourly precipitation",unit:"mm",color:"#58c5e8",bars:true},
 {key:"temperatura",label:"Temperature",unit:"°C",color:"#61dfc0"},
 {key:"humidade",label:"Relative humidity",unit:"%",color:"#c5a4ff"},
 {key:"intensidadeVentoKM",label:"Wind speed",unit:"km/h",color:"#ffbd73"},
 {key:"idDireccVento",label:"Wind direction",unit:"Direction code",color:"#80baff",direction:true},
-{key:"precAcumulada",label:"Hourly precipitation",unit:"mm",color:"#58c5e8",bars:true},
 {key:"pressao",label:"Pressure",unit:"hPa",color:"#fb8da1"},
 {key:"radiacao",label:"Radiation",unit:"kJ/m²",color:"#f3db75"}
 ];
@@ -221,19 +222,40 @@ function drawCharts(rows){
  chartEntries.forEach(({canvas,metric:m})=>{
   const wrap=canvas.parentElement,dpr=Math.max(1,devicePixelRatio||1),w=wrap.clientWidth,h=wrap.clientHeight;
   canvas.width=Math.round(w*dpr);canvas.height=Math.round(h*dpr);const ctx=canvas.getContext("2d");ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);
-  const pad={l:m.direction?58:48,r:10,t:12,b:30},cw=w-pad.l-pad.r,ch=h-pad.t-pad.b;
-  const pts=rows.map(r=>({time:r.time,ms:r.ms,value:usable(r.values[m.key])?Number(r.values[m.key]):null}));
+  let pts;
+  if(m.cumulative){
+   // Each precAcumulada record is treated as the precipitation for that hourly
+   // interval. The daily curve starts at 00:00 with 0 mm and advances to the
+   // end of each interval (00:00 record -> 01:00, ..., 23:00 -> 24:00).
+   let total=0;pts=[{hour:0,value:0}];
+   rows.forEach(r=>{
+    const hour=Number(String(r.time).slice(11,13));
+    const value=usable(r.values[m.key])?Number(r.values[m.key]):null;
+    if(value!==null){total+=value;pts.push({hour:Math.min(24,hour+1),value:total})}
+   });
+  }else{
+   pts=rows.map(r=>({hour:Number(String(r.time).slice(11,13)),value:usable(r.values[m.key])?Number(r.values[m.key]):null}));
+  }
   const valid=pts.filter(p=>p.value!==null);
   if(!valid.length){ctx.fillStyle="#93a6b5";ctx.font="12px system-ui";ctx.textAlign="center";ctx.fillText("No data for this variable",w/2,h/2);return}
-  let min,max;if(m.direction){min=-.5;max=9.5}else{min=Math.min(...valid.map(p=>p.value));max=Math.max(...valid.map(p=>p.value));if(min===max){const d=Math.abs(min)*.1||1;min-=d;max+=d}const ex=(max-min)*.12;min-=ex;max+=ex}
-  const x=p=>pad.l+(new Date(p.time.replace(" ","T")+"Z").getUTCHours()/24)*cw;
+  let min,max;
+  if(m.direction){min=-.5;max=9.5}
+  else if(m.cumulative){min=0;max=Math.max(...valid.map(p=>p.value));if(max===0)max=1;else max*=1.12}
+  else{min=Math.min(...valid.map(p=>p.value));max=Math.max(...valid.map(p=>p.value));if(min===max){const d=Math.abs(min)*.1||1;min-=d;max+=d}const ex=(max-min)*.12;min-=ex;max+=ex}
+  const pad={l:m.direction?58:48,r:10,t:12,b:30},cw=w-pad.l-pad.r,ch=h-pad.t-pad.b;
+  const x=p=>pad.l+(p.hour/24)*cw;
   const y=v=>pad.t+(max-v)/(max-min)*ch;
   ctx.font="10px system-ui";ctx.lineWidth=1;ctx.textAlign="right";ctx.textBaseline="middle";
   if(m.direction){for(let k=0;k<=9;k++){const yy=y(k);ctx.strokeStyle="#253541";ctx.beginPath();ctx.moveTo(pad.l,yy);ctx.lineTo(w-pad.r,yy);ctx.stroke();ctx.fillStyle="#8da1af";ctx.fillText(windDirections[k],pad.l-7,yy)}}
   else for(let i=0;i<=3;i++){const yy=pad.t+i*ch/3,val=max-i*(max-min)/3;ctx.strokeStyle="#253541";ctx.beginPath();ctx.moveTo(pad.l,yy);ctx.lineTo(w-pad.r,yy);ctx.stroke();ctx.fillStyle="#8da1af";ctx.fillText(val.toFixed(1),pad.l-7,yy)}
   ctx.textAlign="center";ctx.textBaseline="top";for(let i=0;i<=4;i++){const hour=i*6;const xx=pad.l+hour/24*cw;ctx.fillStyle="#8da1af";ctx.fillText(String(hour).padStart(2,"0")+":00",xx,h-pad.b+9)}
-  if(m.bars){const bw=Math.max(3,cw/24*.62);ctx.fillStyle=m.color+"b8";valid.forEach(p=>ctx.fillRect(x(p)-bw/2,y(p.value),bw,Math.max(1,pad.t+ch-y(p.value))))}
-  else{ctx.beginPath();let open=false;pts.forEach(p=>{if(p.value===null){open=false;return}if(!open){ctx.moveTo(x(p),y(p.value));open=true}else ctx.lineTo(x(p),y(p.value))});ctx.strokeStyle=m.color;ctx.lineWidth=2;ctx.lineJoin="round";ctx.stroke();valid.forEach(p=>{ctx.beginPath();ctx.arc(x(p),y(p.value),2.5,0,Math.PI*2);ctx.fillStyle=m.color;ctx.fill()})}
+  if(m.bars){
+   const bw=Math.max(3,cw/24*.68);ctx.fillStyle=m.color+"b8";
+   valid.forEach(p=>{const xx=pad.l+((p.hour+.5)/24)*cw;ctx.fillRect(xx-bw/2,y(p.value),bw,Math.max(1,pad.t+ch-y(p.value)))});
+  }else{
+   ctx.beginPath();let open=false;pts.forEach(p=>{if(p.value===null){open=false;return}if(!open){ctx.moveTo(x(p),y(p.value));open=true}else ctx.lineTo(x(p),y(p.value))});ctx.strokeStyle=m.color;ctx.lineWidth=2;ctx.lineJoin="round";ctx.stroke();
+   valid.forEach(p=>{ctx.beginPath();ctx.arc(x(p),y(p.value),2.5,0,Math.PI*2);ctx.fillStyle=m.color;ctx.fill()});
+  }
  });
 }
 async function openDatabase(bytes,sourceLabel){
